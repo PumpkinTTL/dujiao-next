@@ -93,6 +93,11 @@
                 <div class="w-full max-w-[280px] sm:max-w-[240px] aspect-square rounded-xl overflow-hidden bg-white p-2">
                   <img :src="qrImageUrl" alt="QR Code" class="w-full h-full object-contain" />
                 </div>
+                <AlipayAppButton
+                  v-if="isAlipayChannel && isMobile"
+                  class="mt-4"
+                  @click="openAlipayApp"
+                />
                 <div v-if="qrUsingPayLinkFallback" class="mt-3 text-xs text-muted-foreground">
                   {{ t('payment.qrFallbackHint') }}
                 </div>
@@ -400,8 +405,12 @@
 
             <div v-if="showQRCode" class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
               <div
-                class="bg-secondary border rounded-xl p-4 flex items-center justify-center">
+                class="bg-secondary border rounded-xl p-4 flex flex-col items-center justify-center gap-4">
                 <img :src="qrImageUrl" alt="QR Code" class="w-48 h-48 object-contain" />
+                <AlipayAppButton
+                  v-if="isAlipayChannel && isMobile"
+                  @click="openAlipayApp"
+                />
               </div>
               <div class="text-sm text-muted-foreground space-y-3">
                 <div class="text-foreground font-semibold">{{ paymentGuideTitle }}</div>
@@ -509,6 +518,7 @@ import { useI18n } from 'vue-i18n'
 import { pageAlertVariant, pageAlertToneClass } from '../utils/alerts'
 import PaymentAmountBreakdown from '../components/payment/PaymentAmountBreakdown.vue'
 import PaymentChannelSelector from '../components/payment/PaymentChannelSelector.vue'
+import AlipayAppButton from '../components/payment/AlipayAppButton.vue'
 import EmptyState from '../components/EmptyState.vue'
 import CheckoutSteps from '../components/checkout/CheckoutSteps.vue'
 import { Input } from '@/components/ui/input'
@@ -526,6 +536,7 @@ const {
   selectedChannel, selectedChannelName, cachedChannelName, resultChannelName, interactionLabel,
   paymentResultTitle, paymentGuideTitle, paymentGuideTip, showPayLink, showTelegramPayHint, payLinkOpenedTip,
   cryptoWalletAddress, cryptoPaymentDetails, hasCryptoPaymentDetails, qrUsingPayLinkFallback, showQRCode, qrImageUrl,
+  isAlipayChannel, isMobile, openAlipayApp,
   orderExpired, orderCanceled, paymentAlert, countdownExpired, countdownText, showCountdown, showResultView, pollingActive, orderItems,
   feeRateDisplay, feeAmountDisplay, fixedFeeDisplay, payableAmountDisplay, walletBalanceDisplay,
   expectedWalletPaidDisplay, expectedOnlinePayDisplay, expectedOnlinePayCents, requiresOnlineChannel,

@@ -19,6 +19,7 @@ import {
 import QRCode from 'qrcode'
 import { type PageAlert } from '../utils/alerts'
 import { loadGuestOrderAuth, saveGuestOrderAuth } from '../utils/guestOrderAuth'
+import { isAlipayChannelType, isMobileViewport, openAlipayApp as openAlipayAppUrl } from '../utils/alipay'
 
 /**
  * 支付页共享逻辑（classic + vault 双模板共用）。
@@ -274,6 +275,15 @@ export function usePayment() {
   const qrDisplayContent = computed(() => qrCodeContent.value || qrFallbackContent.value)
   const qrUsingPayLinkFallback = computed(() => Boolean(!qrCodeContent.value && qrFallbackContent.value))
   const showQRCode = computed(() => interactionMode.value === 'qr' && Boolean(qrDisplayContent.value))
+
+  // 支付宝移动端唤起 APP（保留扫码，额外提供唤起按钮）
+  const isAlipayChannel = computed(() => isAlipayChannelType(paymentChannelType.value))
+  const isMobile = computed(() => isMobileViewport())
+  const openAlipayApp = () => {
+    const url = qrCodeContent.value || payLink.value
+    if (!url) return
+    openAlipayAppUrl(url)
+  }
 
   const qrImageUrl = ref('')
   const qrRenderVersion = ref(0)
@@ -1424,6 +1434,9 @@ export function usePayment() {
     qrUsingPayLinkFallback,
     showQRCode,
     qrImageUrl,
+    isAlipayChannel,
+    isMobile,
+    openAlipayApp,
     // status
     orderExpired,
     orderCanceled,

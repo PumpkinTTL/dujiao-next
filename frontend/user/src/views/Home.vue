@@ -4,7 +4,7 @@
     <!-- ==================== LIST MODE ==================== -->
     <template v-if="templateMode === 'list'">
       <!-- Hero Banner (shared with card mode) -->
-      <section v-if="showHeroSection" class="relative z-10 border-b pt-24 pb-10">
+    <section v-if="showHeroSection" class="relative z-10 border-b pt-24 pb-4">
         <div class="container mx-auto px-4">
           <div class="relative overflow-hidden rounded-2xl border bg-card"
             @touchstart="onBannerTouchStart"
@@ -163,7 +163,7 @@
 
     <!-- ==================== CARD MODE (default) ==================== -->
     <template v-else>
-    <section v-if="showHeroSection" class="relative z-10 border-b pt-24 pb-10">
+    <section v-if="showHeroSection" class="relative z-10 border-b pt-24 pb-4">
       <div class="container mx-auto px-4">
         <div class="relative overflow-hidden rounded-2xl border bg-card"
           @touchstart="onBannerTouchStart"
@@ -260,12 +260,13 @@
       </div>
     </section>
 
-    <section id="featured" class="relative z-10 pb-14" :class="showHeroSection ? 'pt-14' : 'pt-32 md:pt-36'">
+    <section id="featured" class="relative z-10 pb-14" :class="showHeroSection ? 'pt-4' : 'pt-24'">
       <div class="container mx-auto px-4">
-        <div class="mb-8 flex items-end justify-between gap-4">
+        <!-- 精选商品标题区 -->
+        <div class="mb-6 flex items-end justify-between gap-4 rounded-xl border bg-card/80 px-5 py-4">
           <div>
-            <h2 class="theme-section-heading text-3xl md:text-4xl">{{ t('home.featured.title') }}</h2>
-            <p class="mt-2 text-sm text-muted-foreground">{{ t('home.featured.description') }}</p>
+            <h2 class="text-lg font-bold text-foreground">{{ t('home.featured.title') }}</h2>
+            <p class="mt-1 text-xs text-muted-foreground">{{ t('home.featured.description') }}</p>
           </div>
           <router-link
                 v-if="!hasHeroLink"
@@ -299,10 +300,10 @@
 
     <section class="relative z-10 py-12">
       <div class="container mx-auto px-4">
-        <div class="mb-6 flex items-end justify-between gap-4">
+        <div class="mb-6 flex items-end justify-between gap-4 rounded-xl border bg-card/80 px-5 py-4">
           <div>
-            <h2 class="theme-section-heading text-[1.7rem]">{{ t('home.latest.title') }}</h2>
-            <p class="mt-1 text-sm text-muted-foreground">{{ t('home.latest.description') }}</p>
+            <h2 class="text-lg font-bold text-foreground">{{ t('home.latest.title') }}</h2>
+            <p class="mt-1 text-xs text-muted-foreground">{{ t('home.latest.description') }}</p>
           </div>
           <div class="flex items-center gap-3 text-sm">
             <router-link v-if="blogEnabled" to="/blog" class="text-muted-foreground transition-colors hover:text-foreground">{{ t('nav.blog') }}</router-link>
