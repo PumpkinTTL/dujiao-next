@@ -268,6 +268,7 @@ const (
 // 第三方登录提供方常量
 const (
 	UserOAuthProviderTelegram = "telegram"
+	UserOAuthProviderGoogle   = "google"
 )
 
 // 登录日志状态常量
@@ -291,6 +292,8 @@ const (
 	LoginLogFailReasonTelegramExpired      = "telegram_expired"
 	LoginLogFailReasonTelegramReplayed     = "telegram_replayed"
 	LoginLogFailReasonTelegramConfig       = "telegram_config_invalid"
+	LoginLogFailReasonGoogleInvalid        = "google_invalid"
+	LoginLogFailReasonGoogleConfig         = "google_config_invalid"
 	LoginLogFailReasonInternalError        = "internal_error"
 	LoginLogFailReasonInvalidTOTPCode      = "invalid_totp_code"
 	LoginLogFailReasonInvalidRecoveryCode  = "invalid_recovery_code"
@@ -304,6 +307,7 @@ const (
 const (
 	LoginLogSourceWeb      = "web"
 	LoginLogSourceTelegram = "telegram"
+	LoginLogSourceGoogle   = "google"
 )
 
 // 验证码用途常量
@@ -338,6 +342,13 @@ const (
 	NotificationEventManualFulfillmentPending = "manual_fulfillment_pending"
 	NotificationEventExceptionAlert           = "exception_alert"
 	NotificationEventExceptionAlertCheck      = "exception_alert_check"
+)
+
+// 通知中心渠道常量
+const (
+	NotificationChannelEmail    = "email"
+	NotificationChannelTelegram = "telegram"
+	NotificationChannelFeishu   = "feishu"
 )
 
 // 通知中心异常阈值类型常量
@@ -440,6 +451,7 @@ const (
 	SettingKeySMTPConfig               = "smtp_config"
 	SettingKeyCaptchaConfig            = "captcha_config"
 	SettingKeyTelegramAuthConfig       = "telegram_auth_config"
+	SettingKeyGoogleAuthConfig         = "google_auth_config"
 	SettingKeyDashboardConfig          = "dashboard_config"
 	SettingKeyNotificationCenterConfig = "notification_center_config"
 	SettingKeyAffiliateConfig          = "affiliate_config"

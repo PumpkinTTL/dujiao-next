@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -60,6 +61,9 @@ func SetupRouter(cfg *config.Config, c *container.Container) *gin.Engine {
 		log = logger.Init(cfg.Server.Mode, cfg.Log.ToLoggerOptions())
 	}
 	r := gin.New()
+	if err := configureTrustedProxies(r, cfg.Server.TrustedProxies); err != nil {
+		panic(fmt.Errorf("server.trusted_proxies 配置错误: %w", err))
+	}
 	captchaVerifier := captchahttp.NewVerifier(c.CaptchaService)
 
 	// 初始化 Handler（按前台/后台分组）
@@ -122,6 +126,7 @@ func SetupRouter(cfg *config.Config, c *container.Container) *gin.Engine {
 	user2FAHandler := userAuthHandlers.TwoFA
 	userTelegramOIDCHandler := userAuthHandlers.TelegramOIDC
 	userTelegramHandler := userAuthHandlers.Telegram
+	userGoogleHandler := userAuthHandlers.Google
 	walletHandlers := walletbootstrap.New(c)
 	userWalletHandler := walletHandlers.User
 	adminWalletHandler := walletHandlers.Admin
@@ -222,7 +227,7 @@ func SetupRouter(cfg *config.Config, c *container.Container) *gin.Engine {
 	sitemaptransport.RegisterRoutes(r, sitemaptransport.NewHandler(c.SitemapService, sitemapbrand.New(c.SettingService)))
 
 	apiV1 := r.Group("/api/v1")
-	registerStorefrontRoutes(apiV1, cfg, c, publicContentHandler, publicCatalogHandler, publicCategoryHandler, userResellerHandler, userResellerProductSettingHandler, userResellerFinanceHandler, userResellerOrderHandler, userApiCredentialHandler, userAuditLogHandler, userGiftCardHandler, publicMemberLevelHandler, userProfileHandler, userEmailHandler, userPasswordHandler, userVerifyHandler, userTelegramOIDCHandler, userTelegramHandler, userLoginHandler, user2FAHandler, publicConfigHandler, userCartHandler, userOrderHandler, guestOrderHandler, orderPreviewHandler, orderCreateHandler, paymentLatestHandler, paymentWriteHandler, userWalletHandler, redisClient, loginRule, guestReadRule, guestWriteRule)
+	registerStorefrontRoutes(apiV1, cfg, c, publicContentHandler, publicCatalogHandler, publicCategoryHandler, userResellerHandler, userResellerProductSettingHandler, userResellerFinanceHandler, userResellerOrderHandler, userApiCredentialHandler, userAuditLogHandler, userGiftCardHandler, publicMemberLevelHandler, userProfileHandler, userEmailHandler, userPasswordHandler, userVerifyHandler, userTelegramOIDCHandler, userTelegramHandler, userGoogleHandler, userLoginHandler, user2FAHandler, publicConfigHandler, userCartHandler, userOrderHandler, guestOrderHandler, orderPreviewHandler, orderCreateHandler, paymentLatestHandler, paymentWriteHandler, userWalletHandler, redisClient, loginRule, guestReadRule, guestWriteRule)
 	registerUpstreamRoutes(apiV1, c, upstreamHandler, redisClient, upstreamAPIRule)
 	registerChannelRoutes(apiV1, c, channelHandler, channelMemberLevelHandler, channelGiftCardHandler, channelAffiliateHandler, channelTelegramBotHandler, channelWalletHandler)
 	registerPaymentCallbackRoutes(apiV1, paymentCallbackHandler, paymentWebhookHandler)
@@ -249,6 +254,30 @@ func SetupRouter(cfg *config.Config, c *container.Container) *gin.Engine {
 	}
 
 	return r
+}
+
+func configureTrustedProxies(engine *gin.Engine, trustedProxies []string) error {
+	if engine == nil {
+		return fmt.Errorf("gin engine is nil")
+	}
+	for _, rawProxy := range trustedProxies {
+		proxy := strings.TrimSpace(rawProxy)
+		if proxy == "" {
+			return fmt.Errorf("trusted proxy cannot be empty")
+		}
+		if net.ParseIP(proxy) != nil {
+			continue
+		}
+		_, network, err := net.ParseCIDR(proxy)
+		if err != nil {
+			return fmt.Errorf("invalid trusted proxy %q: %w", proxy, err)
+		}
+		ones, bits := network.Mask.Size()
+		if ones == 0 && (bits == 32 || bits == 128) {
+			return fmt.Errorf("trusted proxy %q would trust every address", proxy)
+		}
+	}
+	return engine.SetTrustedProxies(trustedProxies)
 }
 
 type adminPermissionCatalogItem struct {

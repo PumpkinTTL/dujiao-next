@@ -1,13 +1,16 @@
 package migrations
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/dujiao-next/internal/constants"
 	cardsecretdomain "github.com/dujiao-next/internal/modules/cardsecret/domain"
 	cartdomain "github.com/dujiao-next/internal/modules/cart/domain"
+	externalidentitydomain "github.com/dujiao-next/internal/modules/identity/externalidentity/domain"
 
 	productdomain "github.com/dujiao-next/internal/modules/catalog/product/domain"
 	orderdomain "github.com/dujiao-next/internal/modules/order/domain"
@@ -262,6 +265,141 @@ func TestMigrateCartSKUUniqueIndex(t *testing.T) {
 	}
 }
 
+func TestEnsureUserOAuthIdentityUserProviderUniqueIndexFailsClosedOnLegacyDuplicates(t *testing.T) {
+	db := setupSKUMigrationTestDB(t)
+	if err := db.AutoMigrate(&externalidentitydomain.Identity{}); err != nil {
+		t.Fatalf("auto migrate identity: %v", err)
+	}
+	now := time.Now()
+	first := &externalidentitydomain.Identity{
+		UserID: 42, Provider: "telegram", ProviderUserID: "legacy-effective",
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}
+	second := &externalidentitydomain.Identity{
+		UserID: 42, Provider: "telegram", ProviderUserID: "legacy-hidden",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(first).Error; err != nil {
+		t.Fatalf("create first legacy identity: %v", err)
+	}
+	if err := db.Create(second).Error; err != nil {
+		t.Fatalf("create duplicate legacy identity: %v", err)
+	}
+
+	err := ensureUserOAuthIdentityUserProviderUniqueIndex()
+	if err == nil {
+		t.Fatalf("expected explicit duplicate preflight failure")
+	}
+	for _, expected := range []string{
+		userOAuthIdentityUserProviderUniqueIndex,
+		"1 duplicate user/provider group",
+		"user_id=42",
+		`provider="telegram"`,
+		"count=2",
+		"SELECT id,user_id,provider,provider_user_id",
+	} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Fatalf("migration error %q does not include %q", err, expected)
+		}
+	}
+	if db.Migrator().HasIndex(
+		&userOAuthIdentityUserProviderIndexSchema{},
+		userOAuthIdentityUserProviderUniqueIndex,
+	) {
+		t.Fatalf("index %s must not exist after dirty preflight failure", userOAuthIdentityUserProviderUniqueIndex)
+	}
+
+	var identities []externalidentitydomain.Identity
+	if err := db.Where("user_id = ? AND provider = ?", 42, "telegram").
+		Order("id ASC").
+		Find(&identities).Error; err != nil {
+		t.Fatalf("load deduplicated identities: %v", err)
+	}
+	if len(identities) != 2 || identities[0].ID != first.ID || identities[1].ID != second.ID {
+		t.Fatalf("dirty migration changed credentials: %+v", identities)
+	}
+
+	// After an operator resolves the duplicate deliberately, the same migration
+	// creates the invariant and remains idempotent.
+	if err := db.Delete(second).Error; err != nil {
+		t.Fatalf("resolve duplicate explicitly: %v", err)
+	}
+	if err := ensureUserOAuthIdentityUserProviderUniqueIndex(); err != nil {
+		t.Fatalf("ensure unique index after resolution: %v", err)
+	}
+	if err := ensureUserOAuthIdentityUserProviderUniqueIndex(); err != nil {
+		t.Fatalf("idempotent ensure unique index: %v", err)
+	}
+	if !db.Migrator().HasIndex(
+		&userOAuthIdentityUserProviderIndexSchema{},
+		userOAuthIdentityUserProviderUniqueIndex,
+	) {
+		t.Fatalf("missing index %s", userOAuthIdentityUserProviderUniqueIndex)
+	}
+
+	duplicate := &externalidentitydomain.Identity{
+		UserID: 42, Provider: "telegram", ProviderUserID: "must-fail",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(duplicate).Error; err == nil {
+		t.Fatalf("expected database unique constraint for same user/provider")
+	}
+	otherUser := &externalidentitydomain.Identity{
+		UserID: 43, Provider: "telegram", ProviderUserID: "other-user",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(otherUser).Error; err != nil {
+		t.Fatalf("same provider on another user should remain valid: %v", err)
+	}
+}
+
+type racingNamedIndexMigrator struct {
+	hasIndexResults []bool
+	hasIndexCalls   int
+	createCalls     int
+	createErr       error
+}
+
+func (m *racingNamedIndexMigrator) HasIndex(interface{}, string) bool {
+	index := m.hasIndexCalls
+	m.hasIndexCalls++
+	if index >= len(m.hasIndexResults) {
+		return false
+	}
+	return m.hasIndexResults[index]
+}
+
+func (m *racingNamedIndexMigrator) CreateIndex(interface{}, string) error {
+	m.createCalls++
+	return m.createErr
+}
+
+func TestCreateIndexConvergingOnExistingHandlesOnlyConcurrentWinner(t *testing.T) {
+	ddlErr := errors.New("index already exists")
+	migrator := &racingNamedIndexMigrator{
+		hasIndexResults: []bool{false, true},
+		createErr:       ddlErr,
+	}
+	if err := createIndexConvergingOnExisting(migrator, &struct{}{}, "idx_target"); err != nil {
+		t.Fatalf("concurrent winner should converge: %v", err)
+	}
+	if migrator.createCalls != 1 || migrator.hasIndexCalls != 2 {
+		t.Fatalf("calls = create:%d has:%d, want 1/2", migrator.createCalls, migrator.hasIndexCalls)
+	}
+}
+
+func TestCreateIndexConvergingOnExistingPreservesDDLFailure(t *testing.T) {
+	ddlErr := errors.New("duplicate rows prevent unique index")
+	migrator := &racingNamedIndexMigrator{
+		hasIndexResults: []bool{false, false},
+		createErr:       ddlErr,
+	}
+	err := createIndexConvergingOnExisting(migrator, &struct{}{}, "idx_target")
+	if !errors.Is(err, ddlErr) {
+		t.Fatalf("error = %v, want original DDL error", err)
+	}
+}
+
 func TestAutoMigrateOwnsResellerSchemaAndCrossModuleConstraints(t *testing.T) {
 	db := setupRegistryMigrationTestDB(t)
 	if err := AutoMigrate(); err != nil {
@@ -312,6 +450,45 @@ func TestAutoMigrateOwnsResellerSchemaAndCrossModuleConstraints(t *testing.T) {
 	}
 	if db.Migrator().HasConstraint(&procurementdomain.Order{}, supersededProcurementOrderForeignKeyConstraint) {
 		t.Errorf("central AutoMigrate retained superseded procurement constraint %s", supersededProcurementOrderForeignKeyConstraint)
+	}
+}
+
+func TestBackfillPendingOrderRiskIPsHandlesLegacyNullsAndIPv6(t *testing.T) {
+	db := setupSKUMigrationTestDB(t)
+	if err := db.AutoMigrate(&orderdomain.Order{}); err != nil {
+		t.Fatalf("auto migrate orders: %v", err)
+	}
+
+	pendingIPv4 := &orderdomain.Order{OrderNo: "risk-ipv4", Status: constants.OrderStatusPendingPayment, Currency: "USD", ClientIP: "1.2.3.4"}
+	pendingIPv6 := &orderdomain.Order{OrderNo: "risk-ipv6", Status: constants.OrderStatusPendingPayment, Currency: "USD", ClientIP: "2001:db8:abcd:12::9"}
+	paid := &orderdomain.Order{OrderNo: "risk-paid", Status: constants.OrderStatusPaid, Currency: "USD", ClientIP: "5.6.7.8"}
+	for _, order := range []*orderdomain.Order{pendingIPv4, pendingIPv6, paid} {
+		if err := db.Create(order).Error; err != nil {
+			t.Fatalf("create order %s: %v", order.OrderNo, err)
+		}
+		if err := db.Exec("UPDATE orders SET risk_ip = NULL WHERE id = ?", order.ID).Error; err != nil {
+			t.Fatalf("set legacy NULL risk_ip for %s: %v", order.OrderNo, err)
+		}
+	}
+
+	if err := backfillPendingOrderRiskIPs(db); err != nil {
+		t.Fatalf("backfill risk IPs: %v", err)
+	}
+	var gotIPv4, gotIPv6, gotPaid orderdomain.Order
+	if err := db.First(&gotIPv4, pendingIPv4.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&gotIPv6, pendingIPv6.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&gotPaid, paid.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gotIPv4.RiskIP != "1.2.3.4" || gotIPv6.RiskIP != "2001:db8:abcd:12::/64" {
+		t.Fatalf("unexpected risk IP backfill: ipv4=%q ipv6=%q", gotIPv4.RiskIP, gotIPv6.RiskIP)
+	}
+	if gotPaid.RiskIP != "" {
+		t.Fatalf("paid history must not be backfilled, got %q", gotPaid.RiskIP)
 	}
 }
 

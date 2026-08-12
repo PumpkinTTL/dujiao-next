@@ -15,6 +15,40 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  installer:
+    name: Verify installer
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shell test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-yaml shellcheck
+
+      - name: Check Bash syntax and ShellCheck
+        run: |
+          bash -n scripts/dujiao-next-manager.sh
+          bash -n scripts/tests/dujiao-next-manager_test.sh
+          shellcheck -x -S warning scripts/dujiao-next-manager.sh scripts/tests/dujiao-next-manager_test.sh
+
+      - name: Run installer tests
+        run: sudo bash scripts/tests/dujiao-next-manager_test.sh
+
+      - name: Check release archive includes installer
+        run: |
+          python3 - <<'PY'
+          import yaml
+
+          with open('.goreleaser.yaml', encoding='utf-8') as handle:
+              config = yaml.safe_load(handle)
+          files = config['archives'][0]['files']
+          assert './scripts/dujiao-next-manager.sh' in files, files
+          PY
+
   api:
     name: Verify API
     runs-on: ubuntu-latest
@@ -107,6 +141,9 @@ jobs:
       # release notes 的 sanitizer 是后台唯一一处 v-html，攻击向量必须每次 CI 都跑一遍
       - name: Run admin frontend tests
         run: (cd frontend/admin && pnpm run test)
+
+      - name: Run user frontend tests
+        run: (cd frontend/user && pnpm run test)
 
       # 两个 build 脚本都以 `vue-tsc -b` 开头，因此这一步同时覆盖了类型检查
       - name: Build frontends

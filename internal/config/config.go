@@ -22,6 +22,7 @@ type Config struct {
 	UserJWT      JWTConfig          `mapstructure:"user_jwt"`
 	Bootstrap    BootstrapConfig    `mapstructure:"bootstrap"`
 	TelegramAuth TelegramAuthConfig `mapstructure:"telegram_auth"`
+	GoogleAuth   GoogleAuthConfig   `mapstructure:"google_auth"`
 	Redis        RedisConfig        `mapstructure:"redis"`
 	Queue        QueueConfig        `mapstructure:"queue"`
 	Upload       UploadConfig       `mapstructure:"upload"`
@@ -42,9 +43,10 @@ type AppConfig struct {
 
 // ServerConfig 服务器配置
 type ServerConfig struct {
-	Host string `mapstructure:"host"`
-	Port string `mapstructure:"port"`
-	Mode string `mapstructure:"mode"` // debug / release
+	Host           string   `mapstructure:"host"`
+	Port           string   `mapstructure:"port"`
+	Mode           string   `mapstructure:"mode"` // debug / release
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
 }
 
 // LogConfig 日志配置
@@ -107,6 +109,12 @@ type TelegramAuthConfig struct {
 	MiniAppURL         string `mapstructure:"mini_app_url"`
 	LoginExpireSeconds int    `mapstructure:"login_expire_seconds"`
 	ReplayTTLSeconds   int    `mapstructure:"replay_ttl_seconds"`
+}
+
+// GoogleAuthConfig Google Identity Services 登录配置。
+type GoogleAuthConfig struct {
+	Enabled  bool   `mapstructure:"enabled"`
+	ClientID string `mapstructure:"client_id"`
 }
 
 // RedisConfig Redis 配置
@@ -309,6 +317,7 @@ func Load() *Config {
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", "8080")
 	viper.SetDefault("server.mode", "debug")
+	viper.SetDefault("server.trusted_proxies", []string{"127.0.0.1/32", "::1/128"})
 	viper.SetDefault("log.dir", "")
 	viper.SetDefault("log.filename", "app.log")
 	viper.SetDefault("log.max_size_mb", 100)
@@ -333,6 +342,8 @@ func Load() *Config {
 	viper.SetDefault("telegram_auth.bot_token", "")
 	viper.SetDefault("telegram_auth.login_expire_seconds", 300)
 	viper.SetDefault("telegram_auth.replay_ttl_seconds", 300)
+	viper.SetDefault("google_auth.enabled", false)
+	viper.SetDefault("google_auth.client_id", "")
 	viper.SetDefault("redis.enabled", true)
 	viper.SetDefault("redis.host", "127.0.0.1")
 	viper.SetDefault("redis.port", 6379)

@@ -14,6 +14,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { notifyError, notifySuccess } from '@/utils/notify'
 import { applySiteIcon } from '@/utils/favicon'
 import { getImageUrl } from '@/utils/image'
+import { orderEmailSceneKeys } from '@/utils/orderEmailTemplates'
 import MediaPicker from '@/components/admin/MediaPicker.vue'
 import SettingsSMTPTab from './components/SettingsSMTPTab.vue'
 import SettingsCaptchaTab from './components/SettingsCaptchaTab.vue'
@@ -31,6 +32,7 @@ const navigationTabRef = ref<InstanceType<typeof SettingsNavigationTab>>()
 const homeAnnouncementTabRef = ref<InstanceType<typeof SettingsHomeAnnouncementTab>>()
 const upstreamSyncTabRef = ref<InstanceType<typeof SettingsUpstreamSyncTab>>()
 const siteIconPickerRef = ref<InstanceType<typeof MediaPicker> | null>(null)
+const siteLogoPickerRef = ref<InstanceType<typeof MediaPicker> | null>(null)
 const supportedLanguages = ['zh-CN', 'zh-TW', 'en-US'] as const
 type SupportedLanguage = (typeof supportedLanguages)[number]
 type SiteScriptPosition = 'head' | 'body_end'
@@ -79,6 +81,7 @@ const tabs = computed(() => [
   { label: t('admin.settings.tabs.orderEmailTemplate'), value: 'order_email_template' },
   { label: t('admin.settings.tabs.captcha'), value: 'captcha' },
   { label: t('admin.settings.tabs.telegram'), value: 'telegram' },
+  { label: t('admin.settings.tabs.google'), value: 'google' },
   { label: t('admin.settings.tabs.dashboard'), value: 'dashboard' },
   { label: t('admin.settings.tabs.upstreamSync'), value: 'upstream_sync' },
 ])
@@ -178,7 +181,9 @@ const form = reactive({
   brand: {
     site_name: '',
     site_url: '',
+    // site_icon 是浏览器 favicon；site_logo 是前台页面 Logo，二者必须独立保存和清除。
     site_icon: '',
+    site_logo: '',
     site_description: createLocalizedField(),
   },
   currency: 'CNY',
@@ -281,6 +286,11 @@ const telegramForm = reactive({
   mode: '' as string,
 })
 
+const googleForm = reactive({
+  enabled: false,
+  client_id: '',
+})
+
 const createOrderEmailLocalizedTemplate = () => ({ subject: '', body: '' })
 const createOrderEmailSceneTemplate = () => ({
   'zh-CN': createOrderEmailLocalizedTemplate(),
@@ -293,7 +303,6 @@ const orderEmailTemplateData = reactive({
     paid: createOrderEmailSceneTemplate(),
     delivered: createOrderEmailSceneTemplate(),
     delivered_with_content: createOrderEmailSceneTemplate(),
-    canceled: createOrderEmailSceneTemplate(),
     refunded: createOrderEmailSceneTemplate(),
     partially_refunded: createOrderEmailSceneTemplate(),
   },
@@ -301,6 +310,9 @@ const orderEmailTemplateData = reactive({
 })
 
 const dashboardForm = reactive({
+  accounting: {
+    refund_reverses_cost: false,
+  },
   alert: {
     low_stock_threshold: 5,
     out_of_stock_products_threshold: 1,
@@ -362,12 +374,13 @@ const notifyErrorIfNeeded = (err: unknown, fallback: string) => {
 const fetchSettings = async () => {
   loading.value = true
   try {
-    const [siteRes, orderRes, smtpRes, captchaRes, telegramRes, dashboardRes, registrationRes, orderEmailTmplRes] = await Promise.all([
+    const [siteRes, orderRes, smtpRes, captchaRes, telegramRes, googleRes, dashboardRes, registrationRes, orderEmailTmplRes] = await Promise.all([
       adminAPI.getSettings({ key: 'site_config' }),
       adminAPI.getSettings({ key: 'order_config' }),
       adminAPI.getSMTPSettings(),
       adminAPI.getCaptchaSettings(),
       adminAPI.getTelegramAuthSettings(),
+      adminAPI.getGoogleAuthSettings(),
       adminAPI.getSettings({ key: 'dashboard_config' }),
       adminAPI.getSettings({ key: 'registration_config' }),
       adminAPI.getOrderEmailTemplateSettings(),
@@ -380,6 +393,7 @@ const fetchSettings = async () => {
         form.brand.site_name = String(brand.site_name || '')
         form.brand.site_url = String(brand.site_url || '')
         form.brand.site_icon = String(brand.site_icon || '')
+        form.brand.site_logo = String(brand.site_logo || '')
         form.brand.site_description = normalizeLocalizedField(brand.site_description)
       }
       {
@@ -521,10 +535,18 @@ const fetchSettings = async () => {
       telegramForm.mode = String(telegram.mode || '')
     }
 
+    if (googleRes.data && googleRes.data.data) {
+      const google = googleRes.data.data as Record<string, unknown>
+      googleForm.enabled = !!google.enabled
+      googleForm.client_id = String(google.client_id || '')
+    }
+
     if (dashboardRes.data && dashboardRes.data.data) {
       const dashboard = dashboardRes.data.data as Record<string, unknown>
+      const dashAccounting = dashboard.accounting as Record<string, unknown> | undefined
       const dashAlert = dashboard.alert as Record<string, unknown> | undefined
       const dashRanking = dashboard.ranking as Record<string, unknown> | undefined
+      dashboardForm.accounting.refund_reverses_cost = dashAccounting?.refund_reverses_cost === true
       dashboardForm.alert.low_stock_threshold = clampNumber(dashAlert?.low_stock_threshold, 1, 500, 5)
       dashboardForm.alert.out_of_stock_products_threshold = clampNumber(dashAlert?.out_of_stock_products_threshold, 1, 10000, 1)
       dashboardForm.alert.pending_payment_orders_threshold = clampNumber(dashAlert?.pending_payment_orders_threshold, 1, 100000, 20)
@@ -545,8 +567,7 @@ const fetchSettings = async () => {
       const tmplData = orderEmailTmplRes.data.data as Record<string, unknown>
       const templates = tmplData.templates as Record<string, unknown> | undefined
       if (templates) {
-        const sceneKeys = ['default', 'paid', 'delivered', 'delivered_with_content', 'canceled', 'refunded', 'partially_refunded'] as const
-        sceneKeys.forEach((key) => {
+        orderEmailSceneKeys.forEach((key) => {
           const scene = templates[key] as Record<string, unknown> | undefined
           if (scene) {
             supportedLanguages.forEach((lang) => {
@@ -610,8 +631,16 @@ const openSiteIconPicker = () => {
   siteIconPickerRef.value?.openPicker()
 }
 
+const openSiteLogoPicker = () => {
+  siteLogoPickerRef.value?.openPicker()
+}
+
 const clearSiteIcon = () => {
   form.brand.site_icon = ''
+}
+
+const clearSiteLogo = () => {
+  form.brand.site_logo = ''
 }
 
 const saveOrderSettings = async () => {
@@ -691,9 +720,21 @@ const saveTelegramAuthSettings = async () => {
   telegramForm.oidc_redirect_uri = String(data?.oidc_redirect_uri ?? telegramForm.oidc_redirect_uri)
 }
 
+const saveGoogleAuthSettings = async () => {
+  const res = await adminAPI.updateGoogleAuthSettings({
+    enabled: googleForm.enabled,
+    client_id: googleForm.client_id.trim(),
+  })
+  const data = res.data?.data as Record<string, unknown> | undefined
+  googleForm.enabled = !!data?.enabled
+  googleForm.client_id = String(data?.client_id || '')
+}
 
 const saveDashboardSettings = async () => {
   const normalized = {
+    accounting: {
+      refund_reverses_cost: dashboardForm.accounting.refund_reverses_cost === true,
+    },
     alert: {
       low_stock_threshold: clampNumber(dashboardForm.alert.low_stock_threshold, 1, 500, 5),
       out_of_stock_products_threshold: clampNumber(dashboardForm.alert.out_of_stock_products_threshold, 1, 10000, 1),
@@ -706,6 +747,7 @@ const saveDashboardSettings = async () => {
     },
   }
 
+  dashboardForm.accounting.refund_reverses_cost = normalized.accounting.refund_reverses_cost
   dashboardForm.alert.low_stock_threshold = normalized.alert.low_stock_threshold
   dashboardForm.alert.out_of_stock_products_threshold = normalized.alert.out_of_stock_products_threshold
   dashboardForm.alert.pending_payment_orders_threshold = normalized.alert.pending_payment_orders_threshold
@@ -749,6 +791,8 @@ const saveSettings = async () => {
   try {
     if (currentTab.value === 'telegram') {
       await saveTelegramAuthSettings()
+    } else if (currentTab.value === 'google') {
+      await saveGoogleAuthSettings()
     } else if (currentTab.value === 'dashboard') {
       await saveDashboardSettings()
     } else {
@@ -919,6 +963,29 @@ onMounted(() => {
             </div>
             <p class="text-xs text-muted-foreground">{{ t('admin.settings.brand.siteIconTip') }}</p>
             <MediaPicker ref="siteIconPickerRef" v-model="form.brand.site_icon" scene="common" dialog-only />
+          </div>
+          <!-- Logo 使用独立的 picker 和清除动作，避免误操作影响浏览器 favicon。 -->
+          <div class="space-y-2">
+            <label class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.brand.siteLogo') }}</label>
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                class="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/20 transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                :title="t('admin.settings.brand.siteLogoTip')"
+                @click="openSiteLogoPicker"
+              >
+                <img v-if="form.brand.site_logo" :src="getImageUrl(form.brand.site_logo)" class="h-full w-full object-contain" alt="" />
+                <span v-else class="text-[10px] font-semibold text-muted-foreground">LOGO</span>
+              </button>
+              <Button type="button" variant="outline" size="sm" @click="openSiteLogoPicker">
+                {{ t('admin.settings.brand.siteLogoSelect') }}
+              </Button>
+              <Button v-if="form.brand.site_logo" type="button" variant="ghost" size="sm" @click="clearSiteLogo">
+                {{ t('admin.common.delete') }}
+              </Button>
+            </div>
+            <p class="text-xs text-muted-foreground">{{ t('admin.settings.brand.siteLogoTip') }}</p>
+            <MediaPicker ref="siteLogoPickerRef" v-model="form.brand.site_logo" scene="common" dialog-only />
           </div>
           <div class="space-y-2 md:col-span-2">
             <div class="flex items-center justify-between">
@@ -1406,6 +1473,34 @@ onMounted(() => {
       </div>
       </TabsContent>
 
+      <TabsContent value="google" :forceMount="true" v-show="currentTab === 'google'" class="space-y-6 mt-0">
+        <div class="rounded-xl border border-border bg-card">
+          <div class="border-b border-border bg-muted/40 px-6 py-4">
+            <h2 class="text-lg font-semibold">{{ t('admin.settings.google.title') }}</h2>
+            <p class="mt-1 text-xs text-muted-foreground">{{ t('admin.settings.google.subtitle') }}</p>
+          </div>
+
+          <div class="space-y-6 p-6">
+            <div class="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3 sm:flex-row sm:items-center">
+              <Switch id="google-auth-enabled" v-model="googleForm.enabled" />
+              <Label for="google-auth-enabled" class="text-sm font-medium">{{ t('admin.settings.google.enabled') }}</Label>
+            </div>
+
+            <div class="space-y-2">
+              <label class="text-xs font-medium text-muted-foreground">{{ t('admin.settings.google.clientID') }}</label>
+              <Input v-model="googleForm.client_id" :placeholder="t('admin.settings.google.clientIDPlaceholder')" />
+              <p class="text-xs text-muted-foreground">{{ t('admin.settings.google.clientIDHint') }}</p>
+            </div>
+
+            <div class="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs leading-5 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">
+              <p>{{ t('admin.settings.google.credentialHint') }}</p>
+              <p class="mt-1">{{ t('admin.settings.google.originHint') }}</p>
+              <p class="mt-1">{{ t('admin.settings.google.redirectHint') }}</p>
+            </div>
+          </div>
+        </div>
+      </TabsContent>
+
       <TabsContent value="upstream_sync" :forceMount="true" v-show="currentTab === 'upstream_sync'" class="mt-0">
         <SettingsUpstreamSyncTab ref="upstreamSyncTabRef" />
       </TabsContent>
@@ -1418,6 +1513,21 @@ onMounted(() => {
         </div>
 
         <div class="space-y-6 p-6">
+          <div class="rounded-xl border border-border">
+            <div class="border-b border-border bg-muted/30 px-4 py-3">
+              <h3 class="text-sm font-semibold">{{ t('admin.settings.dashboard.accounting.title') }}</h3>
+            </div>
+            <div class="p-4">
+              <div class="flex flex-col gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="space-y-1">
+                  <Label for="dashboard-refund-reverses-cost" class="text-sm font-medium">{{ t('admin.settings.dashboard.accounting.refundReversesCost') }}</Label>
+                  <p class="text-xs text-muted-foreground">{{ t('admin.settings.dashboard.accounting.refundReversesCostHint') }}</p>
+                </div>
+                <Switch id="dashboard-refund-reverses-cost" v-model="dashboardForm.accounting.refund_reverses_cost" />
+              </div>
+            </div>
+          </div>
+
           <div class="rounded-xl border border-border">
             <div class="border-b border-border bg-muted/30 px-4 py-3">
               <h3 class="text-sm font-semibold">{{ t('admin.settings.dashboard.alert.title') }}</h3>
