@@ -2,6 +2,7 @@ package bepusdt
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
@@ -65,6 +66,7 @@ type Config struct {
 	Fiat       string `json:"fiat"`        // 法币类型，默认 CNY
 	NotifyURL  string `json:"notify_url"`  // 异步通知地址
 	ReturnURL  string `json:"return_url"`  // 同步跳转地址
+	Address    string `json:"address"`     // 指定收款钱包地址（可选），留空由 BEpusdt 自动分配
 }
 
 // CreateInput 创建订单输入
@@ -163,6 +165,7 @@ func (c *Config) Normalize() {
 	c.Fiat = strings.TrimSpace(c.Fiat)
 	c.NotifyURL = strings.TrimSpace(c.NotifyURL)
 	c.ReturnURL = strings.TrimSpace(c.ReturnURL)
+	c.Address = strings.TrimSpace(c.Address)
 	if c.OrderMode == "" {
 		c.OrderMode = constants.PaymentBepusdtOrderModeTransaction
 	}
@@ -213,6 +216,9 @@ func CreatePayment(ctx context.Context, cfg *Config, input CreateInput) (*Create
 	}
 	if input.Name != "" {
 		params["name"] = input.Name
+	}
+	if cfg.Address != "" {
+		params["address"] = cfg.Address
 	}
 
 	// 生成签名
@@ -358,8 +364,11 @@ func VerifyCallback(cfg *Config, data *CallbackData) error {
 		"status":               data.Status,
 	}
 
+	if strings.TrimSpace(cfg.AuthToken) == "" {
+		return ErrConfigInvalid
+	}
 	expected := Sign(params, cfg.AuthToken)
-	if !strings.EqualFold(expected, data.Signature) {
+	if !hmac.Equal([]byte(strings.ToLower(expected)), []byte(strings.ToLower(data.Signature))) {
 		return ErrSignatureInvalid
 	}
 	return nil

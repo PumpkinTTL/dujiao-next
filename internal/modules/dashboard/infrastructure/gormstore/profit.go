@@ -3,9 +3,11 @@ package gormstore
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	orderdomain "github.com/dujiao-next/internal/modules/order/domain"
+	paymentdomain "github.com/dujiao-next/internal/modules/payment/domain"
 
 	"github.com/dujiao-next/internal/constants"
 	dashboard "github.com/dujiao-next/internal/modules/dashboard/contract"
@@ -17,15 +19,17 @@ func profitOrderStatuses() []string {
 }
 
 type refundAdjustmentRow struct {
-	Day          string
-	RefundAmount float64
-	RefundedCost float64
+	Day                string
+	RefundAmount       float64
+	RefundedCost       float64
+	PaymentFeeRefunded float64
 }
 
 type refundAggregateRow struct {
-	Day          string
-	OrderID      uint
-	RefundAmount float64 `gorm:"column:refund_amount"`
+	Day                string
+	OrderID            uint
+	RefundAmount       float64 `gorm:"column:refund_amount"`
+	PaymentFeeRefunded float64 `gorm:"column:payment_fee_refunded"`
 }
 
 // getRefundAdjustments 按退款发生日计算退款金额与同比例冲回的成本。
@@ -33,13 +37,15 @@ type refundAggregateRow struct {
 func (r *Store) getRefundAdjustments(startAt, endAt time.Time) ([]refundAdjustmentRow, error) {
 	refundDayExpr := dateGroupExpr(r.db, "order_refund_records.created_at", startAt.Location(), startAt)
 	refundRows := make([]refundAggregateRow, 0)
+	timeWhere, timeArgs := timeRangeQuery(r.db, "order_refund_records.created_at", startAt, endAt)
 	if err := r.db.Model(&orderdomain.OrderRefundRecord{}).
 		Select(fmt.Sprintf(`
 			%s as day,
 			order_refund_records.order_id as order_id,
-			COALESCE(SUM(order_refund_records.amount), 0) as refund_amount
+			COALESCE(SUM(order_refund_records.amount), 0) as refund_amount,
+			COALESCE(SUM(order_refund_records.payment_fee_refunded_amount), 0) as payment_fee_refunded
 		`, refundDayExpr)).
-		Where("order_refund_records.deleted_at IS NULL AND order_refund_records.created_at >= ? AND order_refund_records.created_at < ?", startAt, endAt).
+		Where("order_refund_records.deleted_at IS NULL AND "+timeWhere, timeArgs...).
 		Group(fmt.Sprintf("%s, order_refund_records.order_id", refundDayExpr)).
 		Scan(&refundRows).Error; err != nil {
 		return nil, err
@@ -107,8 +113,9 @@ func (r *Store) getRefundAdjustments(startAt, endAt time.Time) ([]refundAdjustme
 	adjustments := make([]refundAdjustmentRow, 0, len(refundRows))
 	for _, row := range refundRows {
 		adjustment := refundAdjustmentRow{
-			Day:          row.Day,
-			RefundAmount: row.RefundAmount,
+			Day:                row.Day,
+			RefundAmount:       row.RefundAmount,
+			PaymentFeeRefunded: row.PaymentFeeRefunded,
 		}
 		orderTotal := orderTotalByID[row.OrderID]
 		if orderTotal > 0 && row.RefundAmount > 0 {
@@ -123,13 +130,15 @@ func (r *Store) getRefundAdjustments(startAt, endAt time.Time) ([]refundAdjustme
 // GetProfitOverview 获取利润总览统计
 func (r *Store) GetProfitOverview(startAt, endAt time.Time) (dashboard.ProfitOverviewRow, error) {
 	result := dashboard.ProfitOverviewRow{}
+	timeWhere, timeArgs := timeRangeQuery(r.db, "orders.created_at", startAt, endAt)
+	args := append(timeArgs, profitOrderStatuses())
 	if err := r.db.Model(&orderdomain.OrderItem{}).
 		Select(`
 			COALESCE(SUM(order_items.total_price - order_items.coupon_discount), 0) as total_revenue,
 			COALESCE(SUM(order_items.cost_price * order_items.quantity), 0) as total_cost
 		`).
 		Joins("JOIN orders ON orders.id = order_items.order_id").
-		Where("order_items.deleted_at IS NULL AND orders.deleted_at IS NULL AND orders.created_at >= ? AND orders.created_at < ? AND orders.status IN ?", startAt, endAt, profitOrderStatuses()).
+		Where("order_items.deleted_at IS NULL AND orders.deleted_at IS NULL AND "+timeWhere+" AND orders.status IN ?", args...).
 		Scan(&result).Error; err != nil {
 		return result, err
 	}
@@ -138,10 +147,21 @@ func (r *Store) GetProfitOverview(startAt, endAt time.Time) (dashboard.ProfitOve
 	if err != nil {
 		return result, err
 	}
+	paymentFeeRefunded := 0.0
 	for _, adjustment := range refundAdjustments {
 		result.TotalRevenue -= adjustment.RefundAmount
 		result.RefundedCost += adjustment.RefundedCost
+		paymentFeeRefunded += adjustment.PaymentFeeRefunded
 	}
+	paymentTimeWhere, paymentTimeArgs := timeRangeQuery(r.db, "created_at", startAt, endAt)
+	paymentArgs := append(paymentTimeArgs, constants.PaymentStatusSuccess, constants.PaymentProviderWallet, constants.PaymentFeePolicyMerchantAbsorbed)
+	if err := r.db.Model(&paymentdomain.Payment{}).
+		Select("COALESCE(SUM(fee_amount), 0)").
+		Where("deleted_at IS NULL AND "+paymentTimeWhere+" AND status = ? AND provider_type <> ? AND fee_policy = ?", paymentArgs...).
+		Scan(&result.PaymentFee).Error; err != nil {
+		return result, err
+	}
+	result.PaymentFee -= paymentFeeRefunded
 	return result, nil
 }
 
@@ -150,13 +170,15 @@ func (r *Store) GetProfitTrends(startAt, endAt time.Time) ([]dashboard.ProfitTre
 	orderDayExpr := dateGroupExpr(r.db, "orders.created_at", startAt.Location(), startAt)
 
 	rows := make([]dashboard.ProfitTrendRow, 0)
+	timeWhere, timeArgs := timeRangeQuery(r.db, "orders.created_at", startAt, endAt)
+	args := append(timeArgs, profitOrderStatuses())
 	if err := r.db.Model(&orderdomain.OrderItem{}).Select(fmt.Sprintf(`
 		%s as day,
 		COALESCE(SUM(order_items.total_price - order_items.coupon_discount), 0) as revenue,
 		COALESCE(SUM(order_items.cost_price * order_items.quantity), 0) as cost
 	`, orderDayExpr)).
 		Joins("JOIN orders ON orders.id = order_items.order_id").
-		Where("order_items.deleted_at IS NULL AND orders.deleted_at IS NULL AND orders.created_at >= ? AND orders.created_at < ? AND orders.status IN ?", startAt, endAt, profitOrderStatuses()).
+		Where("order_items.deleted_at IS NULL AND orders.deleted_at IS NULL AND "+timeWhere+" AND orders.status IN ?", args...).
 		Group(orderDayExpr).
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -164,6 +186,25 @@ func (r *Store) GetProfitTrends(startAt, endAt time.Time) ([]dashboard.ProfitTre
 
 	refundRows, err := r.getRefundAdjustments(startAt, endAt)
 	if err != nil {
+		return nil, err
+	}
+
+	type paymentFeeTrendRow struct {
+		Day        string
+		PaymentFee float64 `gorm:"column:payment_fee"`
+	}
+	paymentFeeRows := make([]paymentFeeTrendRow, 0)
+	paymentFeeDayExpr := dateGroupExpr(r.db, "payments.created_at", startAt.Location(), startAt)
+	paymentTimeWhere, paymentTimeArgs := timeRangeQuery(r.db, "created_at", startAt, endAt)
+	paymentArgs := append(paymentTimeArgs, constants.PaymentStatusSuccess, constants.PaymentProviderWallet, constants.PaymentFeePolicyMerchantAbsorbed)
+	if err := r.db.Model(&paymentdomain.Payment{}).
+		Select(fmt.Sprintf(`
+			%s as day,
+			COALESCE(SUM(fee_amount), 0) as payment_fee
+		`, paymentFeeDayExpr)).
+		Where("deleted_at IS NULL AND "+paymentTimeWhere+" AND status = ? AND provider_type <> ? AND fee_policy = ?", paymentArgs...).
+		Group(paymentFeeDayExpr).
+		Scan(&paymentFeeRows).Error; err != nil {
 		return nil, err
 	}
 
@@ -180,6 +221,17 @@ func (r *Store) GetProfitTrends(startAt, endAt time.Time) ([]dashboard.ProfitTre
 		row.Day = day
 		row.Revenue -= refundRow.RefundAmount
 		row.RefundedCost += refundRow.RefundedCost
+		row.PaymentFee -= refundRow.PaymentFeeRefunded
+		byDay[day] = row
+	}
+	for _, paymentFeeRow := range paymentFeeRows {
+		day := strings.TrimSpace(paymentFeeRow.Day)
+		if day == "" {
+			continue
+		}
+		row := byDay[day]
+		row.Day = day
+		row.PaymentFee += paymentFeeRow.PaymentFee
 		byDay[day] = row
 	}
 

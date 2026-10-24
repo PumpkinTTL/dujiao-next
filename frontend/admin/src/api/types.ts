@@ -280,6 +280,21 @@ export interface AdminGiftCardBatch {
   created_at: string
 }
 
+// --- InviteCode ---
+export interface AdminInviteCode {
+  id: number
+  code: string
+  max_uses: number
+  used_count: number
+  expires_at?: string | null
+  status: 'active' | 'disabled'
+  note: string
+  created_by?: number | null
+  created_at: string
+  updated_at: string
+  usable: boolean
+}
+
 // --- MemberLevel ---
 export interface AdminMemberLevel {
   id: number
@@ -460,6 +475,10 @@ export interface AdminPayment {
   fee_rate: number | string
   fixed_fee?: number | string
   fee_amount: number
+  fee_policy?: 'none' | 'merchant_absorbed' | 'customer_surcharge' | 'legacy_customer_surcharge'
+  exception_code?: string
+  superseded_at?: string
+  superseded_by_payment_id?: number
   currency: string
   status: string
   provider_trade_no?: string
@@ -489,6 +508,8 @@ export interface AdminOrderRefund {
   type: string
   refund_type_label?: string
   amount: string
+  payment_fee_refunded: boolean
+  payment_fee_refunded_amount: string
   currency: string
   remark?: string
   items?: AdminOrderItem[]

@@ -59,7 +59,8 @@ export function useAbout() {
   const hasIntroduction = computed(() => introductionText.value !== '')
   const hasServices = computed(() => servicesTitle.value !== '' || serviceItems.value.length > 0)
   const contactList = computed(() => getContactList(contactConfig.value as Record<string, unknown> | undefined))
-  const hasContactLinks = computed(() => contactList.value.length > 0)
+  const hasContactLinks = computed(() => contactList.value.length > 0
+    || !!(contactConfig.value?.telegram || contactConfig.value?.whatsapp || contactConfig.value?.email || contactConfig.value?.support_url))
   const hasContact = computed(() => contactTitle.value !== '' || contactText.value !== '' || hasContactLinks.value)
 
   onMounted(async () => {

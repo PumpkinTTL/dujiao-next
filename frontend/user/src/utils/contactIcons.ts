@@ -36,9 +36,21 @@ export const contactIcons: Record<string, ContactIconConfig> = {
     label: 'QQ',
     color: '#12B7F5',
   },
+  email: {
+    path: 'M1.5 4.5h21a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5h-21A1.5 1.5 0 0 1 0 18V6a1.5 1.5 0 0 1 1.5-1.5Zm10.5 8.4L2.9 6.6a.6.6 0 0 0-.9.52v.2l10.15 6.44a.6.6 0 0 0 .7 0L23 7.32v-.2a.6.6 0 0 0-.9-.52L12 12.9Z',
+    viewBox: '0 0 24 24',
+    label: '邮箱',
+    color: '#6366f1',
+  },
+  support_url: {
+    path: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm.9 15.3h-1.8v-1.8h1.8v1.8Zm1.9-7.02c-.42.5-.9.86-1.2 1.28-.24.32-.36.62-.36 1.14h-1.74c0-.86.2-1.36.64-1.9.44-.54 1-.9 1.3-1.36.3-.44.4-.84.4-1.3a1.9 1.9 0 0 0-1.9-1.9c-1 0-1.7.6-1.94 1.5H8.2A3.66 3.66 0 0 1 11.94 5a3.66 3.66 0 0 1 3.74 3.7c0 .74-.24 1.36-.62 1.88l-.26.3Z',
+    viewBox: '0 0 24 24',
+    label: '帮助',
+    color: '#f59e0b',
+  },
 }
 
-export const contactOrder: string[] = ['telegram', 'whatsapp', 'x', 'wechat', 'qq']
+export const contactOrder: string[] = ['telegram', 'whatsapp', 'x', 'wechat', 'qq', 'email', 'support_url']
 
 export interface ContactItem {
   key: string

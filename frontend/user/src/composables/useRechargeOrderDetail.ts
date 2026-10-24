@@ -5,8 +5,8 @@ import QRCode from 'qrcode'
 import { walletAPI } from '../api/wallet'
 import { useTelegramMiniAppStore } from '../stores/telegramMiniApp'
 import { copyText } from '../utils/clipboard'
-import { basisPointsToPercent, rateToBasisPoints } from '../utils/money'
 import { resolvePaymentLinkNavigationTarget, resolvePaymentPresentationMode } from '../utils/paymentResumePolicy'
+import { isCustomerSurchargePayment, shouldAutoOpenPaymentLink } from '../utils/paymentResumePolicy'
 import { isAlipayChannelType, isMobileViewport, openAlipayApp as openAlipayAppUrl } from '../utils/alipay'
 import type { BadgeTone } from '../utils/status'
 
@@ -104,11 +104,8 @@ export function useRechargeOrderDetail() {
     return details
   })
   const hasCryptoPaymentDetails = computed(() => cryptoPaymentDetails.value.length > 0)
-
-  const feeRateDisplay = computed(() => {
-    const rate = rateToBasisPoints(recharge.value?.fee_rate ?? payment.value?.fee_rate)
-    if (rate === null) return '0.00%'
-    return `${basisPointsToPercent(rate)}%`
+  const customerFeeApplied = computed(() => {
+    return isCustomerSurchargePayment(payment.value) && Number(recharge.value?.fee_amount || 0) > 0
   })
 
   const rechargeStatusText = (status?: string) => {
@@ -158,6 +155,7 @@ export function useRechargeOrderDetail() {
       qr_code: payload.qr_code,
       expires_at: payload.expires_at,
       status: payload.status,
+      fee_policy: payload.fee_policy,
     } : undefined)
     if (paymentData) {
       payment.value = paymentData
@@ -302,7 +300,7 @@ export function useRechargeOrderDetail() {
     if (isPending.value) {
       startPolling()
       // 自动跳转类支付使用当前标签页，避免异步加载后被浏览器拦截为弹窗。
-      if (payLink.value && paymentPresentationMode.value === 'redirect') {
+      if (shouldAutoOpenPaymentLink(payment.value)) {
         openPayLinkInCompatibleWindow(true)
       }
     }
@@ -331,7 +329,7 @@ export function useRechargeOrderDetail() {
     cryptoWalletAddress,
     cryptoPaymentDetails,
     hasCryptoPaymentDetails,
-    feeRateDisplay,
+    customerFeeApplied,
     rechargeStatusText,
     rechargeStatusVariant,
     rechargeStatusPillClass,
